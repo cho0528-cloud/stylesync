@@ -1,440 +1,434 @@
-"use client";
-
-import React, { useState, useRef, useEffect, useCallback } from "react";
-
-// ─────────────────────────────────────────────────────────────
-//  STRICT CATEGORY SYSTEM
-// ─────────────────────────────────────────────────────────────
-const CORE_KO  = ["상의", "하의", "아우터", "신발", "악세서리"];
-const CORE_EN  = ["Top", "Bottom", "Outer", "Shoes", "Accessory"];
-const CORE_ICO = ["👕",   "👖",    "🧥",    "👟",    "💍"];
-const CI = { TOP:0, BOTTOM:1, OUTER:2, SHOES:3, ACC:4 };
-
-const DB_NAME = "stylesync_db";
-const DB_STORE = "clothes";
-const DB_VERSION = 1;
-const DEFAULT_CITY = "Seoul";
-
-// ─────────────────────────────────────────────────────────────
-//  IndexedDB Helper (No external library)
-// ─────────────────────────────────────────────────────────────
-const openDB = (): Promise<IDBDatabase> => {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
-    request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(DB_STORE)) {
-        db.createObjectStore(DB_STORE, { keyPath: "id" });
-      }
-    };
-  });
-};
-
-const getAllClothes = async (): Promise<ClothingItem[]> => {
-  try {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(DB_STORE, "readonly");
-      const store = tx.objectStore(DB_STORE);
-      const request = store.getAll();
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result || []);
-    });
-  } catch { return []; }
-};
-
-const saveClothes = async (clothes: ClothingItem[]): Promise<void> => {
-  try {
-    const db = await openDB();
-    const tx = db.transaction(DB_STORE, "readwrite");
-    const store = tx.objectStore(DB_STORE);
-    store.clear();
-    clothes.forEach(item => store.put(item));
-    return new Promise((resolve, reject) => {
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch { /* silent fail */ }
-};
-
-// ─────────────────────────────────────────────────────────────
-//  Image Compression (Canvas API - max 600px, quality 0.6)
-// ─────────────────────────────────────────────────────────────
-const compressImage = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.onload = () => {
-        const MAX_WIDTH = 600;
-        const QUALITY = 0.6;
-        
-        let width = img.width;
-        let height = img.height;
-        
-        if (width > MAX_WIDTH) {
-          height = (height * MAX_WIDTH) / width;
-          width = MAX_WIDTH;
-        }
-        
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return reject(new Error("Canvas not supported"));
-        
-        ctx.drawImage(img, 0, 0, width, height);
-        const compressedDataUrl = canvas.toDataURL("image/jpeg", QUALITY);
-        resolve(compressedDataUrl);
-      };
-      img.onerror = () => reject(new Error("Image load failed"));
-      img.src = e.target?.result as string;
-    };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-};
-
-// ─────────────────────────────────────────────────────────────
-//  INTERNATIONALIZATION (i18n)
-// ─────────────────────────────────────────────────────────────
-const TEXTS = {
-  ko: {
-    categories: CORE_KO,
-    weatherLoading: "날씨 확인 중...",
-    gps: "GPS",
-    cityPlaceholder: "도시명",
-    go: "GO",
-    upload: "사진 업로드",
-    recommendTitle: "오늘의 추천 코디",
-    recommendDesc: (temp: number) => `${temp}°C 날씨에 맞춘 조합입니다.`,
-    retry: "다시 추천받기",
-    toastAdded: (n: number) => `${n}개 추가 완료`,
-    toastWeatherError: "날씨 오류",
-    toastNetworkError: "네트워크 오류",
-    toastCityNotFound: "지역을 찾을 수 없습니다.",
-    toastNoGPS: "GPS 불가",
-    toastPermission: "위치 권한 필요",
-    toastSelectCategory: "카테고리 선택 필요",
-    toastWeatherLoading: "날씨 로딩 중",
-    toastAddClothes: "옷을 먼저 추가하세요",
-    weatherClear: "맑음",
-    weatherPartly: "구름 조금",
-    weatherCloudy: "흐림",
-    weatherRain: "비",
-    weatherSnow: "눈",
-    weatherShower: "소나기",
-    weatherStorm: "뇌우",
-  },
-  en: {
-    categories: CORE_EN,
-    weatherLoading: "Checking weather...",
-    gps: "GPS",
-    cityPlaceholder: "City name",
-    go: "GO",
-    upload: "Upload Photos",
-    recommendTitle: "Today's Outfit",
-    recommendDesc: (temp: number) => `Outfit for ${temp}°C weather.`,
-    retry: "Try Again",
-    toastAdded: (n: number) => `${n} item(s) added`,
-    toastWeatherError: "Weather error",
-    toastNetworkError: "Network error",
-    toastCityNotFound: "City not found.",
-    toastNoGPS: "GPS unavailable",
-    toastPermission: "Location permission required",
-    toastSelectCategory: "Select a category first",
-    toastWeatherLoading: "Loading weather...",
-    toastAddClothes: "Add clothes first",
-    weatherClear: "Clear",
-    weatherPartly: "Partly Cloudy",
-    weatherCloudy: "Cloudy",
-    weatherRain: "Rain",
-    weatherSnow: "Snow",
-    weatherShower: "Shower",
-    weatherStorm: "Storm",
-  }
-};
-
-type Lang = "ko" | "en";
-
-// ── Helpers ───────────────────────────────────────────────────
-const cleanCityName = (name: string) => {
-  return name
-    .replace(/(전라북도|전라남도|경상북도|경상남도|충청북도|충청남도|경기도|강원도|전북도|전남도|경북도|경남도|충북도|충남도|전라|경상|충청|강원)/g, "")
-    .trim();
-};
-
-const weatherInfo = (code: number, lang: Lang) => {
-  const t = TEXTS[lang];
-  let label, emoji;
-  if      (code === 0)  { label = t.weatherClear; emoji="☀️"; }
-  else if (code <= 2)   { label = t.weatherPartly; emoji="🌤️"; }
-  else if (code <= 48)  { label = t.weatherCloudy; emoji="⛅"; }
-  else if (code <= 67)  { label = t.weatherRain; emoji="🌧️"; }
-  else if (code <= 77)  { label = t.weatherSnow; emoji="❄️"; }
-  else if (code <= 82)  { label = t.weatherShower; emoji="🌦️"; }
-  else                  { label = t.weatherStorm; emoji="⛈️"; }
-  return { label, emoji };
-};
-
-// 광고 배너 컴포넌트 (수익화 영역)
-const AdBanner = ({ text = "ADVERTISEMENT", style = {} }: { text?: string; style?: React.CSSProperties }) => (
-  <div style={{ 
-    width:"100%", minHeight:64, background:"rgba(255,255,255,0.03)", 
-    border:"1px dashed rgba(255,255,255,0.12)", borderRadius:16, 
-    display:"flex", alignItems:"center", justifyContent:"center", 
-    color:"#444", fontSize:10, letterSpacing:"0.2em", margin:"10px 0",
-    ...style 
-  }}>{text}</div>
-);
-
-// ─────────────────────────────────────────────────────────────
-//  MAIN COMPONENT
-// ─────────────────────────────────────────────────────────────
-interface ClothingItem {
-  id: number;
-  name: string;
-  category: string;
-  imageUrl: string;
-}
-
-interface WeatherData {
-  city: string;
-  temp: number;
-  max: number;
-  min: number;
-  condition: string;
-  emoji: string;
-}
-
-interface OutfitItem {
-  role: string;
-  item: ClothingItem;
-}
-
-export default function StyleSync() {
-  const [lang, setLang] = useState<Lang>(() => {
-    if (typeof window === "undefined") return "ko";
-    return navigator.language.startsWith("ko") ? "ko" : "en";
-  });
-  const t = TEXTS[lang];
-  const categories = t.categories;
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>StyleSync</title>
   
-  const [view, setView] = useState("wardrobe");
-  const [clothes, setClothes] = useState<ClothingItem[]>([]);
-  const [dbReady, setDbReady] = useState(false);
-  const [activeTab, setActiveTab] = useState(categories[0]);
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <style>
+    body { margin: 0; padding: 0; background-color: #0b0b0f; }
+    * { box-sizing: border-box; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
 
-  // Load clothes from IndexedDB on mount
-  useEffect(() => {
-    getAllClothes().then((data) => {
-      setClothes(data);
-      setDbReady(true);
-    });
-  }, []);
-  const [weather, setWeather] = useState<WeatherData | null>(null);
-  const [weatherLoading, setWeatherLoading] = useState(false);
-  const [cityInput, setCityInput] = useState("");
-  const [uploadCat, setUploadCat] = useState<string | null>(null);
-  const [outfitItems, setOutfitItems] = useState<OutfitItem[]>([]);
-  const [outfitLoading, setOutfitLoading] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
+  <script type="text/babel" data-presets="react,typescript">
+    const { useState, useRef, useEffect, useCallback } = React;
 
-  // Save clothes to IndexedDB whenever clothes change (only after initial load)
-  useEffect(() => { if (dbReady) saveClothes(clothes); }, [clothes, dbReady]);
+    // ─────────────────────────────────────────────────────────────
+    //  STRICT CATEGORY SYSTEM
+    // ─────────────────────────────────────────────────────────────
+    const CORE_KO  = ["상의", "하의", "아우터", "신발", "악세서리"];
+    const CORE_EN  = ["Top", "Bottom", "Outer", "Shoes", "Accessory"];
+    const CORE_ICO = ["👕",   "👖",    "🧥",    "👟",    "💍"];
+    const CI = { TOP:0, BOTTOM:1, OUTER:2, SHOES:3, ACC:4 };
 
-  const showToast = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 3000);
-  };
+    const DB_NAME = "stylesync_db";
+    const DB_STORE = "clothes";
+    const DB_VERSION = 1;
+    const DEFAULT_CITY = "Seoul";
 
-  const fetchByCoords = useCallback(async (lat: number, lon: number, label: string) => {
-    try {
-      const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1`);
-      const d = await r.json();
-      const temp = Math.round(d.current.temperature_2m);
-      const { label: cond, emoji } = weatherInfo(d.current.weather_code, lang);
-      setWeather({ city: label, temp, max: Math.round(d.daily.temperature_2m_max[0]), min: Math.round(d.daily.temperature_2m_min[0]), condition: cond, emoji });
-    } catch { showToast(t.toastWeatherError); }
-  }, [lang, t]);
-
-  const fetchWeather = async (raw = cityInput) => {
-    const city = raw.trim();
-    if (!city) return;
-    setWeatherLoading(true);
-    const searchTarget = cleanCityName(city);
-    try {
-      const geoR = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(searchTarget)}&count=1&language=${lang}&format=json`);
-      const geoD = await geoR.json();
-      if (geoD.results?.length) {
-        const g = geoD.results[0];
-        await fetchByCoords(g.latitude, g.longitude, g.admin1 ? `${g.admin1} ${g.name}` : g.name);
-        setCityInput("");
-      } else { showToast(t.toastCityNotFound); }
-    } catch { showToast(t.toastNetworkError); } finally { setWeatherLoading(false); }
-  };
-
-  const fetchByGPS = () => {
-    if (!navigator.geolocation) return showToast(t.toastNoGPS);
-    setWeatherLoading(true);
-    navigator.geolocation.getCurrentPosition(
-      async (p) => { await fetchByCoords(p.coords.latitude, p.coords.longitude, lang === "ko" ? "내 주변" : "Nearby"); setWeatherLoading(false); },
-      () => { setWeatherLoading(false); showToast(t.toastPermission); },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
-  };
-
-  useEffect(() => { fetchWeather(DEFAULT_CITY); }, []);
-
-  const handleFiles = async (files: FileList | null) => {
-    if (!files) return;
-    if (!uploadCat) return showToast(t.toastSelectCategory);
-    const imgs: ClothingItem[] = [];
-    for (const f of Array.from(files)) {
-      try {
-        // Compress image using Canvas API (max 600px, quality 0.6)
-        const compressedDataUrl = await compressImage(f);
-        imgs.push({ id: Date.now()+Math.random(), name: f.name.split('.')[0], category: uploadCat, imageUrl: compressedDataUrl });
-      } catch {
-        // Fallback: skip failed images silently
-      }
-    }
-    if (imgs.length > 0) {
-      setClothes(p => [...p, ...imgs]);
-      setView("wardrobe");
-      showToast(t.toastAdded(imgs.length));
-    }
-  };
-
-  const getOutfit = () => {
-    if (!weather) return showToast(t.toastWeatherLoading);
-    if (!clothes.length) return showToast(t.toastAddClothes);
-    setOutfitLoading(true); setView("outfit");
-    setTimeout(() => {
-      const result: OutfitItem[] = [];
-      // Check both Korean and English categories for compatibility
-      const allCategories = [...CORE_KO, ...CORE_EN];
-      categories.forEach((cat, idx) => {
-        const korCat = CORE_KO[idx];
-        const enCat = CORE_EN[idx];
-        const pool = clothes.filter(c => c.category === cat || c.category === korCat || c.category === enCat);
-        if (pool.length) {
-          if ((cat === "아우터" || cat === "Outer") && weather.temp > 18) return;
-          result.push({ role: cat, item: pool[Math.floor(Math.random() * pool.length)] });
-        }
+    // ─────────────────────────────────────────────────────────────
+    //  IndexedDB Helper (No external library)
+    // ─────────────────────────────────────────────────────────────
+    const openDB = () => {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result);
+        request.onupgradeneeded = (event) => {
+          const db = event.target.result;
+          if (!db.objectStoreNames.contains(DB_STORE)) {
+            db.createObjectStore(DB_STORE, { keyPath: "id" });
+          }
+        };
       });
-      setOutfitItems(result);
-      setOutfitLoading(false);
-    }, 800);
-  };
+    };
 
-  return (
-    <div style={{ minHeight:"100vh", background:"#0b0b0f", color:"#e8e4da", fontFamily:"sans-serif", paddingBottom:120 }}>
-      {/* Header */}
-      <header style={{ position:"sticky", top:0, zIndex:100, background:"rgba(11,11,15,0.95)", backdropFilter:"blur(10px)", borderBottom:"1px solid #1a1a20", padding:"15px 20px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-        <h1 style={{ fontSize:18, fontWeight:900 }}>StyleSync.</h1>
-        <div style={{ display:"flex", alignItems:"center", gap:15 }}>
-          <button onClick={() => setLang(lang === "ko" ? "en" : "ko")} style={{ background:"#1a1a25", border:"1px solid #333", color:"#ffd278", padding:"4px 10px", borderRadius:8, fontSize:10, cursor:"pointer", fontWeight:"bold" }}>{lang === "ko" ? "EN" : "KO"}</button>
-          <nav style={{ display:"flex", gap:12 }}>
-            {["wardrobe", "upload", "outfit"].map(v => (
-              <button key={v} onClick={v === "outfit" ? getOutfit : () => setView(v)} style={{ background:"none", border:"none", color:view===v?"#ffd278":"#555", cursor:"pointer", fontSize:11, fontWeight:"bold" }}>{v.toUpperCase()}</button>
-            ))}
-          </nav>
-        </div>
-      </header>
+    const getAllClothes = async () => {
+      try {
+        const db = await openDB();
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction(DB_STORE, "readonly");
+          const store = tx.objectStore(DB_STORE);
+          const request = store.getAll();
+          request.onerror = () => reject(request.error);
+          request.onsuccess = () => resolve(request.result || []);
+        });
+      } catch { return []; }
+    };
 
-      <main style={{ maxWidth:500, margin:"0 auto", padding:20 }}>
-        {/* 날씨 위젯 */}
-        <div style={{ background:"#16161e", borderRadius:24, padding:20, marginBottom:10, border:"1px solid #222" }}>
-          {weatherLoading ? <p style={{ fontSize:11, color:"#444" }}>{t.weatherLoading}</p> : weather && (
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-              <div>
-                <p style={{ fontSize:10, color:"#555", fontWeight:"bold" }}>{weather.city}</p>
-                <p style={{ fontSize:28, fontWeight:"bold" }}>{weather.emoji} {weather.temp}°</p>
-              </div>
-              <div style={{ textAlign:"right" }}>
-                <button onClick={fetchByGPS} style={{ background:"#1a1a25", border:"1px solid #333", color:"#88ccff", padding:"4px 10px", borderRadius:10, fontSize:10, cursor:"pointer", marginBottom:8 }}>📍 {t.gps}</button>
-                <div style={{ display:"flex", gap:4 }}>
-                  <input value={cityInput} onChange={e=>setCityInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&fetchWeather()} placeholder={t.cityPlaceholder} style={{ background:"#0b0b0f", border:"1px solid #333", color:"#fff", padding:"6px 8px", borderRadius:8, fontSize:11, width:70 }} />
-                  <button onClick={()=>fetchWeather()} style={{ background:"#ffd278", border:"none", color:"#000", padding:"6px 10px", borderRadius:8, fontSize:11, fontWeight:"bold", cursor:"pointer" }}>{t.go}</button>
-                </div>
-              </div>
+    const saveClothes = async (clothes) => {
+      try {
+        const db = await openDB();
+        const tx = db.transaction(DB_STORE, "readwrite");
+        const store = tx.objectStore(DB_STORE);
+        store.clear();
+        clothes.forEach(item => store.put(item));
+        return new Promise((resolve, reject) => {
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        });
+      } catch { /* silent fail */ }
+    };
+
+    // ─────────────────────────────────────────────────────────────
+    //  Image Compression (Canvas API - max 600px, quality 0.6)
+    // ─────────────────────────────────────────────────────────────
+    const compressImage = (file) => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.crossOrigin = "anonymous";
+          img.onload = () => {
+            const MAX_WIDTH = 600;
+            const QUALITY = 0.6;
+            
+            let width = img.width;
+            let height = img.height;
+            
+            if (width > MAX_WIDTH) {
+              height = (height * MAX_WIDTH) / width;
+              width = MAX_WIDTH;
+            }
+            
+            const canvas = document.createElement("canvas");
+            canvas.width = width;
+            canvas.height = height;
+            
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return reject(new Error("Canvas not supported"));
+            
+            ctx.drawImage(img, 0, 0, width, height);
+            const compressedDataUrl = canvas.toDataURL("image/jpeg", QUALITY);
+            resolve(compressedDataUrl);
+          };
+          img.onerror = () => reject(new Error("Image load failed"));
+          img.src = e.target.result;
+        };
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+    };
+
+    // ─────────────────────────────────────────────────────────────
+    //  INTERNATIONALIZATION (i18n)
+    // ─────────────────────────────────────────────────────────────
+    const TEXTS = {
+      ko: {
+        categories: CORE_KO,
+        weatherLoading: "날씨 확인 중...",
+        gps: "GPS",
+        cityPlaceholder: "도시명",
+        go: "GO",
+        upload: "사진 업로드",
+        recommendTitle: "오늘의 추천 코디",
+        recommendDesc: (temp) => `${temp}°C 날씨에 맞춘 조합입니다.`,
+        retry: "다시 추천받기",
+        toastAdded: (n) => `${n}개 추가 완료`,
+        toastWeatherError: "날씨 오류",
+        toastNetworkError: "네트워크 오류",
+        toastCityNotFound: "지역을 찾을 수 없습니다.",
+        toastNoGPS: "GPS 불가",
+        toastPermission: "위치 권한 필요",
+        toastSelectCategory: "카테고리 선택 필요",
+        toastWeatherLoading: "날씨 로딩 중",
+        toastAddClothes: "옷을 먼저 추가하세요",
+        weatherClear: "맑음",
+        weatherPartly: "구름 조금",
+        weatherCloudy: "흐림",
+        weatherRain: "비",
+        weatherSnow: "눈",
+        weatherShower: "소나기",
+        weatherStorm: "뇌우",
+      },
+      en: {
+        categories: CORE_EN,
+        weatherLoading: "Checking weather...",
+        gps: "GPS",
+        cityPlaceholder: "City name",
+        go: "GO",
+        upload: "Upload Photos",
+        recommendTitle: "Today's Outfit",
+        recommendDesc: (temp) => `Outfit for ${temp}°C weather.`,
+        retry: "Try Again",
+        toastAdded: (n) => `${n} item(s) added`,
+        toastWeatherError: "Weather error",
+        toastNetworkError: "Network error",
+        toastCityNotFound: "City not found.",
+        toastNoGPS: "GPS unavailable",
+        toastPermission: "Location permission required",
+        toastSelectCategory: "Select a category first",
+        toastWeatherLoading: "Loading weather...",
+        toastAddClothes: "Add clothes first",
+        weatherClear: "Clear",
+        weatherPartly: "Partly Cloudy",
+        weatherCloudy: "Cloudy",
+        weatherRain: "Rain",
+        weatherSnow: "Snow",
+        weatherShower: "Shower",
+        weatherStorm: "Storm",
+      }
+    };
+
+    // ── Helpers ───────────────────────────────────────────────────
+    const cleanCityName = (name) => {
+      return name
+        .replace(/(전라북도|전라남도|경상북도|경상남도|충청북도|충청남도|경기도|강원도|전북도|전남도|경북도|경남도|충북도|충남도|전라|경상|충청|강원)/g, "")
+        .trim();
+    };
+
+    const weatherInfo = (code, lang) => {
+      const t = TEXTS[lang];
+      let label, emoji;
+      if      (code === 0)  { label = t.weatherClear; emoji="☀️"; }
+      else if (code <= 2)   { label = t.weatherPartly; emoji="🌤️"; }
+      else if (code <= 48)  { label = t.weatherCloudy; emoji="⛅"; }
+      else if (code <= 67)  { label = t.weatherRain; emoji="🌧️"; }
+      else if (code <= 77)  { label = t.weatherSnow; emoji="❄️"; }
+      else if (code <= 82)  { label = t.weatherShower; emoji="🌦️"; }
+      else                  { label = t.weatherStorm; emoji="⛈️"; }
+      return { label, emoji };
+    };
+
+    // 광고 배너 컴포넌트
+    const AdBanner = ({ text = "ADVERTISEMENT", style = {} }) => (
+      <div style={{ 
+        width:"100%", minHeight:64, background:"rgba(255,255,255,0.03)", 
+        border:"1px dashed rgba(255,255,255,0.12)", borderRadius:16, 
+        display:"flex", alignItems:"center", justifyContent:"center", 
+        color:"#444", fontSize:10, letterSpacing:"0.2em", margin:"10px 0",
+        ...style 
+      }}>{text}</div>
+    );
+
+    // ─────────────────────────────────────────────────────────────
+    //  MAIN COMPONENT
+    // ─────────────────────────────────────────────────────────────
+    function StyleSync() {
+      const [lang, setLang] = useState(() => {
+        if (typeof window === "undefined") return "ko";
+        return navigator.language.startsWith("ko") ? "ko" : "en";
+      });
+      const t = TEXTS[lang];
+      const categories = t.categories;
+      
+      const [view, setView] = useState("wardrobe");
+      const [clothes, setClothes] = useState([]);
+      const [dbReady, setDbReady] = useState(false);
+      const [activeTab, setActiveTab] = useState(categories[0]);
+
+      useEffect(() => {
+        getAllClothes().then((data) => {
+          setClothes(data);
+          setDbReady(true);
+        });
+      }, []);
+
+      const [weather, setWeather] = useState(null);
+      const [weatherLoading, setWeatherLoading] = useState(false);
+      const [cityInput, setCityInput] = useState("");
+      const [uploadCat, setUploadCat] = useState(null);
+      const [outfitItems, setOutfitItems] = useState([]);
+      const [outfitLoading, setOutfitLoading] = useState(false);
+      const [toast, setToast] = useState(null);
+      const fileRef = useRef(null);
+
+      useEffect(() => { if (dbReady) saveClothes(clothes); }, [clothes, dbReady]);
+
+      const showToast = (msg) => {
+        setToast(msg);
+        setTimeout(() => setToast(null), 3000);
+      };
+
+      const fetchByCoords = useCallback(async (lat, lon, label) => {
+        try {
+          const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1`);
+          const d = await r.json();
+          const temp = Math.round(d.current.temperature_2m);
+          const { label: cond, emoji } = weatherInfo(d.current.weather_code, lang);
+          setWeather({ city: label, temp, max: Math.round(d.daily.temperature_2m_max[0]), min: Math.round(d.daily.temperature_2m_min[0]), condition: cond, emoji });
+        } catch { showToast(t.toastWeatherError); }
+      }, [lang, t]);
+
+      const fetchWeather = async (raw = cityInput) => {
+        const city = raw.trim();
+        if (!city) return;
+        setWeatherLoading(true);
+        const searchTarget = cleanCityName(city);
+        try {
+          const geoR = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(searchTarget)}&count=1&language=${lang}&format=json`);
+          const geoD = await geoR.json();
+          if (geoD.results?.length) {
+            const g = geoD.results[0];
+            await fetchByCoords(g.latitude, g.longitude, g.admin1 ? `${g.admin1} ${g.name}` : g.name);
+            setCityInput("");
+          } else { showToast(t.toastCityNotFound); }
+        } catch { showToast(t.toastNetworkError); } finally { setWeatherLoading(false); }
+      };
+
+      const fetchByGPS = () => {
+        if (!navigator.geolocation) return showToast(t.toastNoGPS);
+        setWeatherLoading(true);
+        navigator.geolocation.getCurrentPosition(
+          async (p) => { await fetchByCoords(p.coords.latitude, p.coords.longitude, lang === "ko" ? "내 주변" : "Nearby"); setWeatherLoading(false); },
+          () => { setWeatherLoading(false); showToast(t.toastPermission); },
+          { enableHighAccuracy: true, timeout: 10000 }
+        );
+      };
+
+      useEffect(() => { fetchWeather(DEFAULT_CITY); }, []);
+
+      const handleFiles = async (files) => {
+        if (!files) return;
+        if (!uploadCat) return showToast(t.toastSelectCategory);
+        const imgs = [];
+        for (const f of Array.from(files)) {
+          try {
+            const compressedDataUrl = await compressImage(f);
+            imgs.push({ id: Date.now()+Math.random(), name: f.name.split('.')[0], category: uploadCat, imageUrl: compressedDataUrl });
+          } catch {
+            // Fallback
+          }
+        }
+        if (imgs.length > 0) {
+          setClothes(p => [...p, ...imgs]);
+          setView("wardrobe");
+          showToast(t.toastAdded(imgs.length));
+        }
+      };
+
+      const getOutfit = () => {
+        if (!weather) return showToast(t.toastWeatherLoading);
+        if (!clothes.length) return showToast(t.toastAddClothes);
+        setOutfitLoading(true); setView("outfit");
+        setTimeout(() => {
+          const result = [];
+          const allCategories = [...CORE_KO, ...CORE_EN];
+          categories.forEach((cat, idx) => {
+            const korCat = CORE_KO[idx];
+            const enCat = CORE_EN[idx];
+            const pool = clothes.filter(c => c.category === cat || c.category === korCat || c.category === enCat);
+            if (pool.length) {
+              if ((cat === "아우터" || cat === "Outer") && weather.temp > 18) return;
+              result.push({ role: cat, item: pool[Math.floor(Math.random() * pool.length)] });
+            }
+          });
+          setOutfitItems(result);
+          setOutfitLoading(false);
+        }, 800);
+      };
+
+      return (
+        <div style={{ minHeight:"100vh", background:"#0b0b0f", color:"#e8e4da", fontFamily:"sans-serif", paddingBottom:120 }}>
+          <header style={{ position:"sticky", top:0, zIndex:100, background:"rgba(11,11,15,0.95)", backdropFilter:"blur(10px)", borderBottom:"1px solid #1a1a20", padding:"15px 20px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <h1 style={{ fontSize:18, fontWeight:900 }}>StyleSync.</h1>
+            <div style={{ display:"flex", alignItems:"center", gap:15 }}>
+              <button onClick={() => setLang(lang === "ko" ? "en" : "ko")} style={{ background:"#1a1a25", border:"1px solid #333", color:"#ffd278", padding:"4px 10px", borderRadius:8, fontSize:10, cursor:"pointer", fontWeight:"bold" }}>{lang === "ko" ? "EN" : "KO"}</button>
+              <nav style={{ display:"flex", gap:12 }}>
+                {["wardrobe", "upload", "outfit"].map(v => (
+                  <button key={v} onClick={v === "outfit" ? getOutfit : () => setView(v)} style={{ background:"none", border:"none", color:view===v?"#ffd278":"#555", cursor:"pointer", fontSize:11, fontWeight:"bold" }}>{v.toUpperCase()}</button>
+                ))}
+              </nav>
             </div>
-          )}
-        </div>
+          </header>
 
-        {/* 상단 광고 영역 */}
-        <AdBanner />
-
-        {/* 메인 뷰 */}
-        {view === "wardrobe" && (
-          <div style={{ marginTop:20 }}>
-            <div style={{ display:"flex", gap:8, marginBottom:20, overflowX:"auto" }}>
-              {categories.map((cat, idx) => (
-                <button key={cat} onClick={()=>setActiveTab(cat)} style={{ padding:"8px 15px", borderRadius:20, border:"1px solid", borderColor:activeTab===cat?"#ffd278":"#222", background:activeTab===cat?"rgba(255,210,120,0.1)":"#16161e", color:activeTab===cat?"#ffd278":"#555", fontSize:11, whiteSpace:"nowrap", cursor:"pointer" }}>{cat}</button>
-              ))}
-            </div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:15 }}>
-              {clothes.filter(c => {
-                const idx = categories.indexOf(activeTab);
-                return c.category === activeTab || c.category === CORE_KO[idx] || c.category === CORE_EN[idx];
-              }).map(c=>(
-                <div key={c.id} style={{ background:"#16161e", borderRadius:20, overflow:"hidden", border:"1px solid #222", position:"relative" }}>
-                  <img src={c.imageUrl} alt={c.name} style={{ width:"100%", aspectRatio:"4/5", objectFit:"cover" }} />
-                  <button onClick={()=>setClothes(clothes.filter(x=>x.id!==c.id))} style={{ position:"absolute", top:8, right:8, background:"rgba(0,0,0,0.5)", border:"none", color:"#ff4444", width:20, height:20, borderRadius:10, cursor:"pointer" }}>×</button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {view === "upload" && (
-          <div style={{ background:"#16161e", padding:30, borderRadius:24, border:"1px solid #222", textAlign:"center", marginTop:20 }}>
-            <div style={{ display:"flex", justifyContent:"center", gap:5, flexWrap:"wrap", marginBottom:25 }}>
-              {categories.map(cat => (
-                <button key={cat} onClick={()=>setUploadCat(cat)} style={{ padding:"8px 12px", borderRadius:10, border:"1px solid", borderColor:uploadCat===cat?"#ffd278":"#222", background:"transparent", color:uploadCat===cat?"#ffd278":"#555", fontSize:11, cursor:"pointer" }}>{cat}</button>
-              ))}
-            </div>
-            <input type="file" accept="image/*" multiple onChange={e=>handleFiles(e.target.files)} style={{ display:"none" }} ref={fileRef} />
-            <button onClick={()=>fileRef.current?.click()} style={{ width:"100%", padding:"50px 0", border:"2px dashed #333", background:"none", color:"#444", borderRadius:20, cursor:"pointer" }}>{t.upload}</button>
-          </div>
-        )}
-
-        {view === "outfit" && !outfitLoading && (
-          <div style={{ marginTop:20 }}>
-            <div style={{ textAlign:"center", marginBottom:30 }}>
-              <h2 style={{ fontSize:22, fontWeight:"bold", color:"#ffd278" }}>{t.recommendTitle}</h2>
-              <p style={{ fontSize:12, color:"#666", marginTop:5 }}>{t.recommendDesc(weather?.temp || 0)}</p>
-            </div>
-            <div style={{ display:"grid", gap:12 }}>
-              {outfitItems.map(oi => (
-                <div key={oi.item.id} style={{ display:"flex", alignItems:"center", background:"#16161e", borderRadius:20, padding:10, border:"1px solid #222" }}>
-                  <img src={oi.item.imageUrl} alt={oi.item.name} style={{ width:70, height:70, borderRadius:12, objectFit:"cover" }} />
-                  <div style={{ marginLeft:15 }}>
-                    <p style={{ fontSize:9, color:"#ffd278", fontWeight:"bold" }}>{oi.role}</p>
-                    <p style={{ fontSize:14, fontWeight:"bold" }}>{oi.item.name}</p>
+          <main style={{ maxWidth:500, margin:"0 auto", padding:20 }}>
+            <div style={{ background:"#16161e", borderRadius:24, padding:20, marginBottom:10, border:"1px solid #222" }}>
+              {weatherLoading ? <p style={{ fontSize:11, color:"#444" }}>{t.weatherLoading}</p> : weather && (
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <div>
+                    <p style={{ fontSize:10, color:"#555", fontWeight:"bold" }}>{weather.city}</p>
+                    <p style={{ fontSize:28, fontWeight:"bold" }}>{weather.emoji} {weather.temp}°</p>
+                  </div>
+                  <div style={{ textAlign:"right" }}>
+                    <button onClick={fetchByGPS} style={{ background:"#1a1a25", border:"1px solid #333", color:"#88ccff", padding:"4px 10px", borderRadius:10, fontSize:10, cursor:"pointer", marginBottom:8 }}>📍 {t.gps}</button>
+                    <div style={{ display:"flex", gap:4 }}>
+                      <input value={cityInput} onChange={e=>setCityInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&fetchWeather()} placeholder={t.cityPlaceholder} style={{ background:"#0b0b0f", border:"1px solid #333", color:"#fff", padding:"6px 8px", borderRadius:8, fontSize:11, width:70 }} />
+                      <button onClick={()=>fetchWeather()} style={{ background:"#ffd278", border:"none", color:"#000", padding:"6px 10px", borderRadius:8, fontSize:11, fontWeight:"bold", cursor:"pointer" }}>{t.go}</button>
+                    </div>
                   </div>
                 </div>
-              ))}
+              )}
             </div>
-            {/* 코디 결과 하단 광고 */}
-            <AdBanner style={{ marginTop:20 }} />
-            <button onClick={getOutfit} style={{ width:"100%", padding:15, background:"#ffd278", color:"#000", border:"none", borderRadius:15, fontWeight:"bold", marginTop:20, cursor:"pointer" }}>{t.retry}</button>
+
+            <AdBanner />
+
+            {view === "wardrobe" && (
+              <div style={{ marginTop:20 }}>
+                <div style={{ display:"flex", gap:8, marginBottom:20, overflowX:"auto" }}>
+                  {categories.map((cat, idx) => (
+                    <button key={cat} onClick={()=>setActiveTab(cat)} style={{ padding:"8px 15px", borderRadius:20, border:"1px solid", borderColor:activeTab===cat?"#ffd278":"#222", background:activeTab===cat?"rgba(255,210,120,0.1)":"#16161e", color:activeTab===cat?"#ffd278":"#555", fontSize:11, whiteSpace:"nowrap", cursor:"pointer" }}>{cat}</button>
+                  ))}
+                </div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:15 }}>
+                  {clothes.filter(c => {
+                    const idx = categories.indexOf(activeTab);
+                    return c.category === activeTab || c.category === CORE_KO[idx] || c.category === CORE_EN[idx];
+                  }).map(c=>(
+                    <div key={c.id} style={{ background:"#16161e", borderRadius:20, overflow:"hidden", border:"1px solid #222", position:"relative" }}>
+                      <img src={c.imageUrl} alt={c.name} style={{ width:"100%", aspectRatio:"4/5", objectFit:"cover" }} />
+                      <button onClick={()=>setClothes(clothes.filter(x=>x.id!==c.id))} style={{ position:"absolute", top:8, right:8, background:"rgba(0,0,0,0.5)", border:"none", color:"#ff4444", width:20, height:20, borderRadius:10, cursor:"pointer" }}>×</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {view === "upload" && (
+              <div style={{ background:"#16161e", padding:30, borderRadius:24, border:"1px solid #222", textAlign:"center", marginTop:20 }}>
+                <div style={{ display:"flex", justifyContent:"center", gap:5, flexWrap:"wrap", marginBottom:25 }}>
+                  {categories.map(cat => (
+                    <button key={cat} onClick={()=>setUploadCat(cat)} style={{ padding:"8px 12px", borderRadius:10, border:"1px solid", borderColor:uploadCat===cat?"#ffd278":"#222", background:"transparent", color:uploadCat===cat?"#ffd278":"#555", fontSize:11, cursor:"pointer" }}>{cat}</button>
+                  ))}
+                </div>
+                <input type="file" accept="image/*" multiple onChange={e=>handleFiles(e.target.files)} style={{ display:"none" }} ref={fileRef} />
+                <button onClick={()=>fileRef.current?.click()} style={{ width:"100%", padding:"50px 0", border:"2px dashed #333", background:"none", color:"#444", borderRadius:20, cursor:"pointer" }}>{t.upload}</button>
+              </div>
+            )}
+
+            {view === "outfit" && !outfitLoading && (
+              <div style={{ marginTop:20 }}>
+                <div style={{ textAlign:"center", marginBottom:30 }}>
+                  <h2 style={{ fontSize:22, fontWeight:"bold", color:"#ffd278" }}>{t.recommendTitle}</h2>
+                  <p style={{ fontSize:12, color:"#666", marginTop:5 }}>{t.recommendDesc(weather?.temp || 0)}</p>
+                </div>
+                <div style={{ display:"grid", gap:12 }}>
+                  {outfitItems.map(oi => (
+                    <div key={oi.item.id} style={{ display:"flex", alignItems:"center", background:"#16161e", borderRadius:20, padding:10, border:"1px solid #222" }}>
+                      <img src={oi.item.imageUrl} alt={oi.item.name} style={{ width:70, height:70, borderRadius:12, objectFit:"cover" }} />
+                      <div style={{ marginLeft:15 }}>
+                        <p style={{ fontSize:9, color:"#ffd278", fontWeight:"bold" }}>{oi.role}</p>
+                        <p style={{ fontSize:14, fontWeight:"bold" }}>{oi.item.name}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <AdBanner style={{ marginTop:20 }} />
+                <button onClick={getOutfit} style={{ width:"100%", padding:15, background:"#ffd278", color:"#000", border:"none", borderRadius:15, fontWeight:"bold", marginTop:20, cursor:"pointer" }}>{t.retry}</button>
+              </div>
+            )}
+          </main>
+
+          <div style={{ position:"fixed", bottom:0, left:0, right:0, background:"rgba(11,11,15,0.95)", borderTop:"1px solid #1a1a20", padding:"10px 20px", zIndex:200 }}>
+            <AdBanner text="SPECIAL OFFER FOR YOU" style={{ margin:0, minHeight:50 }} />
           </div>
-        )}
-      </main>
 
-      {/* 고정 하단 광고 바 */}
-      <div style={{ position:"fixed", bottom:0, left:0, right:0, background:"rgba(11,11,15,0.95)", borderTop:"1px solid #1a1a20", padding:"10px 20px", zIndex:200 }}>
-        <AdBanner text="SPECIAL OFFER FOR YOU" style={{ margin:0, minHeight:50 }} />
-      </div>
+          {toast && <div style={{ position:"fixed", bottom:80, left:"50%", transform:"translateX(-50%)", background:"#ffd278", color:"#000", padding:"8px 20px", borderRadius:20, fontSize:11, fontWeight:"bold", zIndex:1000 }}>{toast}</div>}
+        </div>
+      );
+    }
 
-      {toast && <div style={{ position:"fixed", bottom:80, left:"50%", transform:"translateX(-50%)", background:"#ffd278", color:"#000", padding:"8px 20px", borderRadius:20, fontSize:11, fontWeight:"bold", zIndex:1000 }}>{toast}</div>}
-    </div>
-  );
-}
+    // 앱을 화면에 그리는 마지막 주문
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<StyleSync />);
+  </script>
+</body>
+</html>
