@@ -6,7 +6,6 @@
   <title>StyleSync</title>
   <meta name="theme-color" content="#0b0b0f">
   
-  <!-- React & Babel CDN -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -273,7 +272,7 @@
       return (
         <div style={{ minHeight: "100vh", background: "#0b0b0f", color: "#e8e4da", fontFamily: "sans-serif", paddingBottom: 120 }}>
           <header style={{ position: "sticky", top: 0, zIndex: 100, background: "rgba(11,11,15,0.95)", backdropFilter: "blur(10px)", borderBottom: "1px solid #1a1a20", padding: "15px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <h1 style={{ fontSize: 18, fontWeight: 900, margin: 0 }}>StyleSync </h1>
+            <h1 onClick={() => setView("wardrobe")} style={{ fontSize: 18, fontWeight: 900, margin: 0, cursor: "pointer" }}>StyleSync</h1>
             <div style={{ display: "flex", alignItems: "center", gap: 15 }}>
               <button onClick={() => setLang(lang === "ko" ? "en" : "ko")} style={{ background: "#1a1a25", border: "1px solid #333", color: "#ffd278", padding: "4px 10px", borderRadius: 8, fontSize: 10, cursor: "pointer", fontWeight: "bold" }}>{lang === "ko" ? "EN" : "KO"}</button>
               <nav style={{ display: "flex", gap: 12 }}>
@@ -285,25 +284,27 @@
           </header>
 
           <main style={{ maxWidth: 500, margin: "0 auto", padding: 20 }}>
-            <div style={{ background: "#16161e", borderRadius: 24, padding: 20, marginBottom: 10, border: "1px solid #222" }}>
-              {weatherLoading ? <p style={{ fontSize: 11, color: "#444" }}>{t.weatherLoading}</p> : weather && (
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div>
-                    <p style={{ fontSize: 10, color: "#555", fontWeight: "bold", margin: 0 }}>{weather.city}</p>
-                    <p style={{ fontSize: 28, fontWeight: "bold", margin: "5px 0 0 0" }}>{weather.emoji} {weather.temp}°</p>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <button onClick={fetchByGPS} style={{ background: "#1a1a25", border: "1px solid #333", color: "#88ccff", padding: "4px 10px", borderRadius: 10, fontSize: 10, cursor: "pointer", marginBottom: 8 }}>📍 {t.gps}</button>
-                    <div style={{ display: "flex", gap: 4 }}>
-                      <input value={cityInput} onChange={e => setCityInput(e.target.value)} onKeyDown={e => e.key === "Enter" && fetchWeather()} placeholder={t.cityPlaceholder} style={{ background: "#0b0b0f", border: "1px solid #333", color: "#fff", padding: "6px 8px", borderRadius: 8, fontSize: 11, width: 70 }} />
-                      <button onClick={() => fetchWeather()} style={{ background: "#ffd278", border: "none", color: "#000", padding: "6px 10px", borderRadius: 8, fontSize: 11, fontWeight: "bold", cursor: "pointer" }}>{t.go}</button>
+            {view !== "privacy" && view !== "terms" && (
+              <div style={{ background: "#16161e", borderRadius: 24, padding: 20, marginBottom: 10, border: "1px solid #222" }}>
+                {weatherLoading ? <p style={{ fontSize: 11, color: "#444" }}>{t.weatherLoading}</p> : weather && (
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <p style={{ fontSize: 10, color: "#555", fontWeight: "bold", margin: 0 }}>{weather.city}</p>
+                      <p style={{ fontSize: 28, fontWeight: "bold", margin: "5px 0 0 0" }}>{weather.emoji} {weather.temp}°</p>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <button onClick={fetchByGPS} style={{ background: "#1a1a25", border: "1px solid #333", color: "#88ccff", padding: "4px 10px", borderRadius: 10, fontSize: 10, cursor: "pointer", marginBottom: 8 }}>📍 {t.gps}</button>
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <input value={cityInput} onChange={e => setCityInput(e.target.value)} onKeyDown={e => e.key === "Enter" && fetchWeather()} placeholder={t.cityPlaceholder} style={{ background: "#0b0b0f", border: "1px solid #333", color: "#fff", padding: "6px 8px", borderRadius: 8, fontSize: 11, width: 70 }} />
+                        <button onClick={() => fetchWeather()} style={{ background: "#ffd278", border: "none", color: "#000", padding: "6px 10px", borderRadius: 8, fontSize: 11, fontWeight: "bold", cursor: "pointer" }}>{t.go}</button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
 
-            <AdBanner />
+            {view !== "privacy" && view !== "terms" && <AdBanner />}
 
             {view === "wardrobe" && (
               <div style={{ marginTop: 20 }}>
@@ -359,7 +360,44 @@
                 <button onClick={getOutfit} style={{ width: "100%", padding: 15, background: "#ffd278", color: "#000", border: "none", borderRadius: 15, fontWeight: "bold", marginTop: 20, cursor: "pointer" }}>{t.retry}</button>
               </div>
             )}
+
+            {/* ── 개인정보처리방침 페이지 ── */}
+            {view === "privacy" && (
+              <div style={{ background: "#16161e", padding: 25, borderRadius: 20, border: "1px solid #222", lineHeight: 1.6, fontSize: 12, color: "#ccc" }}>
+                <h2 style={{ color: "#ffd278", marginTop: 0, fontSize: 18 }}>개인정보처리방침</h2>
+                <p>StyleSync(이하 '서비스')는 이용자의 개인정보를 중요시하며 관련 법령을 준수합니다.</p>
+                <h4 style={{ color: "#fff", marginBottom: 5 }}>1. 수집하는 정보</h4>
+                <p>본 서비스는 별도의 회원가입 없이 이용 가능하며, 사용자가 등록한 옷 데이터 및 이미지는 서버에 저장되지 않고 사용자의 브라우저(IndexedDB)에만 저장됩니다.</p>
+                <h4 style={{ color: "#fff", marginBottom: 5 }}>2. 위치 정보 사용</h4>
+                <p>날씨 정보를 제공하기 위해 사용자의 동의 하에 GPS 위치 정보를 활용하며, 이는 날씨 API 조회 후 즉시 파기됩니다.</p>
+                <h4 style={{ color: "#fff", marginBottom: 5 }}>3. 쿠키 및 광고</h4>
+                <p>구글 애드센스 등 제3자 광고 서비스가 쿠키를 사용하여 사용자의 방문 기록을 바탕으로 맞춤형 광고를 제공할 수 있습니다.</p>
+                <button onClick={() => setView("wardrobe")} style={{ background: "#ffd278", border: "none", padding: "8px 16px", borderRadius: 8, color: "#000", fontWeight: "bold", marginTop: 15, cursor: "pointer" }}>닫기</button>
+              </div>
+            )}
+
+            {/* ── 이용약관 페이지 ── */}
+            {view === "terms" && (
+              <div style={{ background: "#16161e", padding: 25, borderRadius: 20, border: "1px solid #222", lineHeight: 1.6, fontSize: 12, color: "#ccc" }}>
+                <h2 style={{ color: "#ffd278", marginTop: 0, fontSize: 18 }}>이용약관</h2>
+                <h4 style={{ color: "#fff", marginBottom: 5 }}>1. 서비스 목적</h4>
+                <p>StyleSync는 사용자가 등록한 의류 데이터를 바탕으로 날씨에 알맞은 코디를 추천하는 무료 웹 애플리케이션 서비스입니다.</p>
+                <h4 style={{ color: "#fff", marginBottom: 5 }}>2. 책임의 한계</h4>
+                <p>본 서비스에서 제공하는 날씨 및 코디 추천 정보는 참고용이며, 서비스 이용으로 발생한 직접/간접적 손해에 대해 책임을 지지 않습니다.</p>
+                <button onClick={() => setView("wardrobe")} style={{ background: "#ffd278", border: "none", padding: "8px 16px", borderRadius: 8, color: "#000", fontWeight: "bold", marginTop: 15, cursor: "pointer" }}>닫기</button>
+              </div>
+            )}
           </main>
+
+          {/* ── 푸터 (약관 링크 추가 위치) ── */}
+          <footer style={{ textAlign: "center", padding: "20px 0 100px 0", fontSize: 10, color: "#555" }}>
+            <div style={{ display: "flex", justifyContent: "center", gap: 15, marginBottom: 8 }}>
+              <span onClick={() => setView("privacy")} style={{ cursor: "pointer", textDecoration: "underline" }}>개인정보처리방침</span>
+              <span>|</span>
+              <span onClick={() => setView("terms")} style={{ cursor: "pointer", textDecoration: "underline" }}>이용약관</span>
+            </div>
+            <p style={{ margin: 0 }}>© StyleSync. All rights reserved.</p>
+          </footer>
 
           <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "rgba(11,11,15,0.95)", borderTop: "1px solid #1a1a20", padding: "10px 20px", zIndex: 200 }}>
             <AdBanner text="SPECIAL OFFER FOR YOU" style={{ margin: 0, minHeight: 50 }} />
